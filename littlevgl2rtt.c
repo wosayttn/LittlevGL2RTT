@@ -34,6 +34,11 @@ static void color_to24(lv_color24_t *dst, lv_color_t *src)
 }
 
 /* Todo: add gpu */
+extern void ge2dInit(int bpp, int width, int height, void *destination);
+extern void ge2dSpriteBlt_Screen(int destx, int desty, int sprite_width, int sprite_height, void *buf);
+extern int ge2dBitblt_SetAlphaMode(int opt, int ks, int kd);
+extern void ge2dSpriteBltx_Screen(int x, int y, int sprite_sx, int sprite_sy, int width, int height, int sprite_width, int sprite_height, void *buf);
+
 static void lcd_fb_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
 {
     int x1, x2, y1, y2;
@@ -72,7 +77,7 @@ static void lcd_fb_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_colo
         {
             for (x = act_x1; x <= act_x2; x++)
             {
-                location = (x) + (y)*info.width;
+                location = (x) + (y) * info.width;
                 fbp8[location] = color_p->full;
                 color_p++;
             }
@@ -90,7 +95,7 @@ static void lcd_fb_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_colo
         {
             for (x = act_x1; x <= act_x2; x++)
             {
-                location = (x) + (y)*info.width;
+                location = (x) + (y) * info.width;
                 color_to16_maybe(&fbp16[location], color_p);
                 color_p++;
             }
@@ -108,7 +113,7 @@ static void lcd_fb_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_colo
         {
             for (x = act_x1; x <= act_x2; x++)
             {
-                location = (x) + (y)*info.width;
+                location = (x) + (y) * info.width;
                 color_to24(&fbp24[location], color_p);
                 color_p++;
             }
@@ -120,19 +125,26 @@ static void lcd_fb_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_colo
     /* 32 bit per pixel */
     else if (info.bits_per_pixel == 32)
     {
+#if 1
+        // Enter GE2D ->
+        ge2dInit(info.bits_per_pixel, info.width, info.height, (void *)info.framebuffer);
+        // -> Leave GE2D
+        ge2dSpriteBlt_Screen(act_x1, act_y1, act_x2 - act_x1 + 1, act_y2 - act_y1 + 1, (void *)color_p);
+#else
         uint32_t *fbp32 = (uint32_t *)info.framebuffer;
         //TODO
         for (y = act_y1; y <= act_y2; y++)
         {
             for (x = act_x1; x <= act_x2; x++)
             {
-                location = (x) + (y)*info.width;
+                location = (x) + (y) * info.width;
                 fbp32[location] = color_p->full;
                 color_p++;
             }
 
             color_p += x2 - act_x2;
         }
+#endif
     }
 
     struct rt_device_rect_info rect_info;
@@ -180,7 +192,7 @@ static void lcd_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t
         rt_graphix_ops(device)->blit_line((const char *)color_p, act_x1, y, act_x2 - act_x1 + 1);
         color_p += (x2 - x1 + 1);
     }
-    
+
     lv_disp_flush_ready(disp_drv);
 }
 
@@ -210,7 +222,7 @@ static int lvgl_tick_handler_init(void)
     rt_timer_t timer = RT_NULL;
     int ret;
 
-    timer = rt_timer_create("lv_tick", lvgl_tick_run, RT_NULL, 1,RT_TIMER_FLAG_PERIODIC);
+    timer = rt_timer_create("lv_tick", lvgl_tick_run, RT_NULL, 1, RT_TIMER_FLAG_PERIODIC);
     if (timer == RT_NULL)
     {
         return RT_ERROR;
@@ -313,13 +325,16 @@ rt_err_t littlevgl2rtt_init(const char *name)
         return RT_ERROR;
     }
 #endif
-    fbuf = rt_malloc(info.width * 10 * sizeof(*fbuf));
+
+    fbuf = rt_malloc_align(info.width * info.height * sizeof(*fbuf), 32);
     if (!fbuf)
     {
         rt_kprintf("Error: alloc disp buf fail\n");
         return -1;
     }
-
+    rt_kprintf("lv fbuf=%08x\n", fbuf);
+    fbuf = (lv_color_t *)((uint32_t)fbuf | 0x80000000);
+    rt_kprintf("lv fbuf with shadow=%08x\n", fbuf);
     /* littlevgl Init */
     lv_init();
 
@@ -342,7 +357,7 @@ rt_err_t littlevgl2rtt_init(const char *name)
         disp_drv.flush_cb = lcd_fb_flush;
     }
 
-    lv_disp_buf_init(&disp_buf, fbuf, NULL, info.width * 10);
+    lv_disp_buf_init(&disp_buf, fbuf, NULL, info.width * info.height);
     disp_drv.buffer = &disp_buf;
     lv_disp_drv_register(&disp_drv);
 
